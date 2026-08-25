@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Variance Consolidator — Roman's Pizza</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --ink:#14161a;
+    --ink-soft:#3d434d;
+    --muted:#767d89;
+    --line:#dcdfe4;
+    --line-soft:#eceef1;
+    --paper:#f4f5f7;
+    --surface:#ffffff;
+    --short:#b3261e;      /* used more than it should have — shortage */
+    --short-bg:#fdf1f0;
+    --over:#0f6b52;       /* used less than it should have — surplus */
+    --over-bg:#eef7f3;
+    --signal:#c8801a;
+    --focus:#1a5fd0;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,"Cascadia Mono","Roboto Mono",Menlo,Consolas,monospace;
+    --sans:"Inter","Helvetica Neue",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:var(--sans);
+    background:var(--paper);
+    color:var(--ink);
+    font-size:14px;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1500px;margin:0 auto;padding:0 20px 80px}
+
+  /* ---------- masthead ---------- */
+  .masthead{
+    background:var(--ink);
+    color:#fff;
+    margin:0 -20px 26px;
+    padding:26px 20px 22px;
+    border-bottom:3px solid var(--signal);
+  }
+  .masthead-inner{max-width:1460px;margin:0 auto}
+  .eyebrow{
+    font-family:var(--mono);
+    font-size:10.5px;
+    letter-spacing:.18em;
+    text-transform:uppercase;
+    color:#9aa2ae;
+    margin:0 0 6px;
+  }
+  h1{
+    font-size:27px;
+    font-weight:640;
+    letter-spacing:-.022em;
+    margin:0 0 8px;
+  }
+  .lede{color:#aeb5bf;max-width:64ch;margin:0;font-size:13.5px}
+  .lede b{color:#fff;font-weight:600}
+
+  /* ---------- panels ---------- */
+  .panel{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:3px;
+    margin-bottom:18px;
+  }
+  .panel-head{
+    padding:13px 18px;
+    border-bottom:1px solid var(--line-soft);
+    display:flex;
+    align-items:baseline;
+    gap:12px;
+    flex-wrap:wrap;
+  }
+  .panel-head h2{
+    font-size:12px;
+    font-weight:660;
+    letter-spacing:.09em;
+    text-transform:uppercase;
+    margin:0;
+  }
+  .panel-head .note{font-size:12.5px;color:var(--muted)}
+  .panel-body{padding:18px}
+
+  /* ---------- dropzone ---------- */
+  #drop{
+    border:1.5px dashed var(--line);
+    border-radius:3px;
+    padding:38px 24px;
+    text-align:center;
+    background:#fbfbfc;
+    cursor:pointer;
+    transition:border-color .15s, background .15s;
+  }
+  #drop:hover,#drop.hot{border-color:var(--signal);background:#fffaf2}
+  #drop:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+  #drop .big{font-size:15.5px;font-weight:580;margin-bottom:5px}
+  #drop .small{font-size:12.5px;color:var(--muted)}
+  #file{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+
+  /* ---------- controls ---------- */
+  .controls{
+    display:flex;
+    gap:22px;
+    flex-wrap:wrap;
+    align-items:flex-end;
+    padding:16px 18px;
+    border-top:1px solid var(--line-soft);
+    background:#fbfbfc;
+  }
+  .field{display:flex;flex-direction:column;gap:5px}
+  .field label{
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:.13em;
+    text-transform:uppercase;
+    color:var(--muted);
+  }
+  select,input[type=date]{
+    font-family:var(--sans);
+    font-size:13px;
+    padding:6px 9px;
+    border:1px solid var(--line);
+    border-radius:2px;
+    background:#fff;
+    color:var(--ink);
+    min-width:150px;
+  }
+  select:focus-visible,input:focus-visible,button:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+  .checks{display:flex;flex-direction:column;gap:6px;padding-bottom:2px}
+  .checks label{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-soft);cursor:pointer}
+  .spacer{flex:1}
+  button{
+    font-family:var(--sans);
+    font-size:13px;
+    font-weight:560;
+    padding:8px 15px;
+    border-radius:2px;
+    border:1px solid var(--ink);
+    background:var(--ink);
+    color:#fff;
+    cursor:pointer;
+  }
+  button:hover{background:#000}
+  button.ghost{background:#fff;color:var(--ink);border-color:var(--line)}
+  button.ghost:hover{background:var(--paper);border-color:var(--muted)}
+  button[disabled]{opacity:.4;cursor:not-allowed}
+
+  /* ---------- report header ---------- */
+  .rep-head{text-align:center;padding:26px 18px 22px;border-bottom:1px solid var(--line-soft)}
+  .rep-head h2{font-size:23px;font-weight:640;letter-spacing:-.02em;margin:0 0 5px;text-transform:none}
+  .rep-head .sub{font-size:13px;color:var(--ink-soft)}
+  .rep-head .sub.thin{font-size:12px;color:var(--muted);margin-top:3px}
+
+  /* ---------- tables ---------- */
+  .cat{margin:0 0 30px}
+  .cat-name{
+    font-size:14px;
+    font-weight:660;
+    letter-spacing:.02em;
+    padding:0 0 7px;
+    margin:0 0 4px;
+    border-bottom:2px solid var(--ink);
+  }
+  .scroll{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:12.5px}
+  th{
+    font-family:var(--mono);
+    font-size:9.5px;
+    font-weight:600;
+    letter-spacing:.05em;
+    text-transform:uppercase;
+    color:var(--muted);
+    text-align:right;
+    padding:8px 8px 7px;
+    border-bottom:1px solid var(--line);
+    vertical-align:bottom;
+    white-space:normal;
+  }
+  th.l,td.l{text-align:left}
+  td{
+    padding:5px 8px;
+    border-bottom:1px solid var(--line-soft);
+    text-align:right;
+    font-variant-numeric:tabular-nums;
+    white-space:nowrap;
+  }
+  td.l{white-space:normal}
+  td.code{font-family:var(--mono);font-size:11.5px;color:var(--ink-soft)}
+  tbody tr:hover td{background:#fafbfc}
+  .neg{color:var(--short);font-weight:560}
+  .pos{color:var(--over);font-weight:560}
+  tr.tot td{
+    border-top:1.5px solid var(--ink);
+    border-bottom:none;
+    padding-top:8px;
+    font-weight:640;
+  }
+  tr.tot td.lbl{text-align:right;font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+
+  /* ---------- summary + ledger (signature) ---------- */
+  .ledger-row{display:grid;grid-template-columns:minmax(120px,1.3fr) 92px 1fr 118px;gap:14px;align-items:center;padding:5px 0;border-bottom:1px solid var(--line-soft)}
+  .ledger-row .nm{font-size:12.5px}
+  .ledger-row .vv{text-align:right;font-size:12.5px;font-variant-numeric:tabular-nums}
+  .ledger-row .cs{text-align:right;font-size:12.5px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+  .bar{position:relative;height:15px;background:linear-gradient(to right,transparent calc(50% - .5px),var(--line) calc(50% - .5px),var(--line) calc(50% + .5px),transparent calc(50% + .5px))}
+  .bar span{position:absolute;top:2px;height:11px;border-radius:1px}
+  .bar span.n{right:50%;background:var(--short)}
+  .bar span.p{left:50%;background:var(--over)}
+  .ledger-head{display:grid;grid-template-columns:minmax(120px,1.3fr) 92px 1fr 118px;gap:14px;padding:0 0 7px;border-bottom:1px solid var(--line);
+    font-family:var(--mono);font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+  .ledger-head .r{text-align:right}
+  .ledger-head .c{text-align:center}
+  .ledger-row.grand{border-bottom:none;border-top:1.5px solid var(--ink);margin-top:4px;padding-top:9px;font-weight:640}
+
+  /* ---------- flags ---------- */
+  .flag{
+    border-left:3px solid var(--signal);
+    background:#fffaf2;
+    padding:11px 14px;
+    margin:0 0 10px;
+    font-size:12.5px;
+    color:var(--ink-soft);
+  }
+  .flag b{color:var(--ink)}
+  .empty{padding:34px 18px;text-align:center;color:var(--muted);font-size:13px}
+  .err{border-left:3px solid var(--short);background:var(--short-bg);padding:12px 14px;font-size:13px;color:#6d1a15}
+  .hidden{display:none}
+  .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);padding:0 18px;background:#fbfbfc}
+  .tab{
+    background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);
+    padding:11px 14px;font-size:12.5px;font-weight:560;cursor:pointer;border-radius:0;
+  }
+  .tab:hover{background:none;color:var(--ink)}
+  .tab.on{color:var(--ink);border-bottom-color:var(--signal)}
+
+  @media (max-width:760px){
+    .ledger-row,.ledger-head{grid-template-columns:1fr 88px;gap:8px}
+    .ledger-row .bar,.ledger-head .c,.ledger-row .cs,.ledger-head .r:last-child{display:none}
+    h1{font-size:22px}
+    .controls{gap:14px}
+  }
+  @media print{
+    body{background:#fff}
+    .masthead,.controls,#drop,.tabs,.no-print{display:none!important}
+    .panel{border:none}
+    .cat{break-inside:avoid}
+  }
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <div class="masthead-inner">
+    <p class="eyebrow">Roman's Pizza · Stock Control</p>
+    <h1>Variance Consolidator</h1>
+    <p class="lede">Zania exports a separate variance for every single day. Drop that file in and get back <b>one variance for the whole period</b> — opening from the first day, closing from the last, everything in between added up.</p>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <section class="panel">
+    <div class="panel-body">
+      <div id="drop" tabindex="0" role="button" aria-label="Choose a Zania export file">
+        <div class="big">Drop the Zania export here</div>
+        <div class="small">or click to choose a file · .xlsx or .csv · nothing leaves this browser</div>
+      </div>
+      <input type="file" id="file" accept=".xlsx,.xls,.csv">
+      <div id="loaderr" class="err hidden" style="margin-top:14px"></div>
+    </div>
+    <div class="controls hidden" id="controls">
+      <div class="field">
+        <label for="store">Store</label>
+        <select id="store"></select>
+      </div>
+      <div class="field">
+        <label for="from">Period from</label>
+        <select id="from"></select>
+      </div>
+      <div class="field">
+        <label for="to">Period to</label>
+        <select id="to"></select>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="hideCats" checked> Hide categories with no stock or movement</label>
+        <label><input type="checkbox" id="hideItems"> Hide items with no stock or movement</label>
+      </div>
+      <div class="spacer"></div>
+      <div class="field">
+        <label>&nbsp;</label>
+        <div style="display:flex;gap:8px">
+          <button id="dl">Download Excel</button>
+          <button class="ghost" id="pr">Print / PDF</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div id="out"></div>
+
+</div>
+
+<script>
+"use strict";
+
+/* ------------------------------------------------------------------
+   Column resolution — matched on normalised header names so the tool
+   survives Zania reordering or renaming columns slightly.
+------------------------------------------------------------------ */
+const norm = s => String(s == null ? "" : s)
+  .toLowerCase().replace(/[+]/g, "").replace(/[_\-–]/g, " ")
+  .replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+
+const FIELDS = {
+  date:      ["report date", "date"],
+  branchCode:["branch code", "store code"],
+  branch:    ["branch", "store", "store name"],
+  code:      ["item code", "code", "sku"],
+  name:      ["item name", "name", "description"],
+  type:      ["item type", "category", "item category"],
+  unit:      ["base unit", "uom", "unit"],
+  cost:      ["cost price", "unit cost", "cost"],
+  initial:   ["initial quantity", "opening quantity", "opening stock"],
+  receipt:   ["receipt", "receipts", "purchases"],
+  ret:       ["return", "returns"],
+  allotIn:   ["allot in", "allotin", "transfer in"],
+  allotOut:  ["allot out", "allotout", "transfer out"],
+  semi:      ["semi product production", "production"],
+  loss:      ["product loss quantity", "loss quantity", "waste"],
+  adj:       ["adjustment", "adjustments"],
+  sold:      ["sold", "sales quantity", "usage"],
+  final:     ["final term quantity", "closing quantity", "closing stock"],
+  theo:      ["theoretical inventory", "theoretical stock"],
+  qdiff:     ["quantity of difference", "difference quantity"]
+};
+
+const UOM = {kilogram:"KG", kg:"KG", litre:"L", liter:"L", l:"L", each:"EACH", case:"CASE", gram:"G"};
+const num = v => {
+  if (typeof v === "number") return isFinite(v) ? v : 0;
+  if (v == null || v === "") return 0;
+  const n = parseFloat(String(v).replace(/[R,\s]/g, ""));
+  return isFinite(n) ? n : 0;
+};
+
+let RAW = null;   // { rows, dates, stores }
+
+/* ------------------------------------------------------------------
+   Parse
+------------------------------------------------------------------ */
+function parseWorkbook(data, isCsv){
+  const wb = XLSX.read(data, {type: isCsv ? "string" : "array", cellDates:false});
+  const grid = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {header:1, blankrows:false, raw:true});
+  if (!grid.length) throw new Error("That sheet is empty.");
+
+  // find the header row within the first 15 rows
+  let hIdx = -1, map = null;
+  for (let i = 0; i < Math.min(15, grid.length); i++){
+    const heads = grid[i].map(norm);
+    const m = {};
+    for (const key in FIELDS){
+      const idx = heads.findIndex(h => h && FIELDS[key].includes(h));
+      if (idx >= 0) m[key] = idx;
+    }
+    if (m.code != null && m.initial != null && m.final != null){ hIdx = i; map = m; break; }
+  }
+  if (hIdx < 0) throw new Error("Couldn't find the Zania column headers — this doesn't look like an Item Inventory Summary export. Expected columns including Item Code, Initial quantity and Final-term quantity.");
+
+  const g = (r, key) => map[key] == null ? null : r[map[key]];
+  const rows = [];
+  for (let i = hIdx + 1; i < grid.length; i++){
+    const r = grid[i];
+    const code = g(r, "code");
+    if (code == null || code === "") continue;
+    let d = g(r, "date");
+    if (typeof d === "number"){                       // Excel serial
+      const o = XLSX.SSF.parse_date_code(d);
+      if (o) d = `${o.y}-${String(o.m).padStart(2,"0")}-${String(o.d).padStart(2,"0")}`;
+    }
+    d = String(d || "").trim().slice(0, 10);
+    rows.push({
+      date:d,
+      store:String(g(r,"branch") || g(r,"branchCode") || "All stores").trim(),
+      code:String(code).trim(),
+      name:String(g(r,"name") || code).trim(),
+      type:String(g(r,"type") || "Uncategorised").trim(),
+      unit:UOM[norm(g(r,"unit"))] || String(g(r,"unit") || "").toUpperCase(),
+      cost:g(r,"cost") == null || g(r,"cost") === "" ? null : num(g(r,"cost")),
+      initial:num(g(r,"initial")),
+      purch:num(g(r,"receipt")) + num(g(r,"ret")),
+      move:num(g(r,"allotIn")) + num(g(r,"allotOut")) + num(g(r,"semi")) + num(g(r,"loss")) + num(g(r,"adj")),
+      sold:num(g(r,"sold")),
+      final:num(g(r,"final")),
+      qdiff:num(g(r,"qdiff"))
+    });
+  }
+  if (!rows.length) throw new Error("Found the headers but no item rows underneath them.");
+
+  const dates  = [...new Set(rows.map(r => r.date).filter(Boolean))].sort();
+  const stores = [...new Set(rows.map(r => r.store))].sort();
+  return {rows, dates, stores};
+}
+
+/* ------------------------------------------------------------------
+   Consolidate — the whole point of the tool
+
+   Opening   = initial quantity on the first day of the period
+   Closing   = final-term quantity on the last day
+   Purchases = receipts + returns, summed over every day
+   Movement  = allot in/out + production + loss + adjustment, summed
+   Theo use  = the Sold column, summed (Zania stores it negative)
+   Actual    = opening + purchases + movement - closing
+   Variance  = theoretical usage - actual usage   (negative = shortage)
+------------------------------------------------------------------ */
+function consolidate(store, from, to){
+  const rows = RAW.rows.filter(r => r.store === store && r.date >= from && r.date <= to);
+  const days = [...new Set(rows.map(r => r.date))].sort();
+  const byItem = new Map();
+  for (const r of rows){
+    if (!byItem.has(r.code)) byItem.set(r.code, []);
+    byItem.get(r.code).push(r);
+  }
+
+  const items = [];
+  for (const [code, drs] of byItem){
+    drs.sort((a, b) => a.date < b.date ? -1 : 1);
+    const first = drs[0], last = drs[drs.length - 1];
+    const purch = drs.reduce((s, r) => s + r.purch, 0);
+    const move  = drs.reduce((s, r) => s + r.move, 0);
+    const theo  = -drs.reduce((s, r) => s + r.sold, 0);
+    const opening = first.initial, closing = last.final;
+    const actual  = opening + purch + move - closing;
+    const variance = theo - actual;
+    let cost = 0;
+    for (let i = drs.length - 1; i >= 0; i--){ if (drs[i].cost != null){ cost = drs[i].cost; break; } }
+    const dailyVar = drs.reduce((s, r) => s + r.qdiff, 0);
+    items.push({
+      code, name:last.name, cat:last.type || "Uncategorised", uom:last.unit,
+      opening, purch, move, closing, actual, theo, variance, cost,
+      varPct: theo ? variance / theo * 100 : 0,
+      varValue: variance * cost,
+      closeValue: closing * cost,
+      days: drs.length, dailyVar,
+      active: !!(opening || closing || purch || move || theo)
+    });
+  }
+
+  const cats = new Map();
+  for (const it of items){
+    if (!cats.has(it.cat)) cats.set(it.cat, []);
+    cats.get(it.cat).push(it);
+  }
+  const categories = [...cats.keys()].sort().map(name => {
+    const list = cats.get(name).sort((a, b) => a.code.localeCompare(b.code));
+    return {
+      name, items:list,
+      varValue: list.reduce((s, i) => s + i.varValue, 0),
+      closeValue: list.reduce((s, i) => s + i.closeValue, 0),
+      active: list.some(i => i.active)
+    };
+  });
+
+  const flags = items
+    .filter(i => Math.abs(i.variance - i.dailyVar) > 0.01 || i.days < days.length)
+    .sort((a, b) => Math.abs(b.variance - b.dailyVar) - Math.abs(a.variance - a.dailyVar));
+
+  return {store, days, categories, items, flags,
+    totalVar: categories.reduce((s, c) => s + c.varValue, 0),
+    totalClose: categories.reduce((s, c) => s + c.closeValue, 0)};
+}
+
+/* ------------------------------------------------------------------
+   Format + render
+------------------------------------------------------------------ */
+const q = n => {
+  if (!isFinite(n)) n = 0;
+  const r = Math.round(n * 1000) / 1000;
+  return (Math.abs(r) < 0.0005 ? 0 : r).toLocaleString("en-ZA", {maximumFractionDigits:3});
+};
+const money = n => {
+  if (!isFinite(n)) n = 0;
+  const v = Math.abs(n) < 0.005 ? 0 : n;
+  return (v < 0 ? "-R" : "R") + Math.abs(v).toLocaleString("en-ZA", {minimumFractionDigits:2, maximumFractionDigits:2});
+};
+const pct = n => (!isFinite(n) || Math.abs(n) < 0.005 ? 0 : Math.round(n * 100) / 100).toLocaleString("en-ZA", {maximumFractionDigits:2});
+const sign = n => Math.abs(n) < 0.005 ? "" : (n < 0 ? " neg" : " pos");
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const nice = d => {
+  const [y, m, dd] = d.split("-");
+  return `${+dd} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][+m-1]} ${y}`;
+};
+
+const HEAD = ["Code","Name","UoM","Opening Stock","Purchases","Net Stock Movement","Closing Stock",
+              "Actual Usage","Theoretical Usage","Variance","Variance Percentage","Variance Value",
+              "Closing Unit Cost","Closing Stock Value"];
+
+function render(rep){
+  const hideCats  = document.getElementById("hideCats").checked;
+  const hideItems = document.getElementById("hideItems").checked;
+  const cats = rep.categories.filter(c => !hideCats || c.active);
+  const d0 = rep.days[0], d1 = rep.days[rep.days.length - 1];
+
+  let h = `<section class="panel">
+    <div class="rep-head">
+      <h2>Stock Variance Report</h2>
+      <div class="sub">${esc(rep.store)}</div>
+      <div class="sub">From ${nice(d0)} to ${nice(d1)}</div>
+      <div class="sub thin">All financial totals are excluding VAT · consolidated from ${rep.days.length} daily export${rep.days.length===1?"":"s"}</div>
+    </div>
+    <div class="tabs no-print">
+      <button class="tab on" data-view="detail">Detail</button>
+      <button class="tab" data-view="summary">Summary</button>
+      <button class="tab" data-view="check">Check ${rep.flags.length ? "(" + rep.flags.length + ")" : ""}</button>
+    </div>`;
+
+  /* ---- detail ---- */
+  h += `<div class="panel-body view" id="v-detail">`;
+  if (!cats.length) h += `<div class="empty">Nothing to show for this store and period.</div>`;
+  for (const c of cats){
+    const list = hideItems ? c.items.filter(i => i.active) : c.items;
+    if (!list.length) continue;
+    h += `<div class="cat"><div class="cat-name">${esc(c.name)}</div><div class="scroll"><table><thead><tr>`;
+    HEAD.forEach((t, i) => h += `<th class="${i < 3 ? "l" : ""}">${t}</th>`);
+    h += `</tr></thead><tbody>`;
+    for (const i of list){
+      h += `<tr>
+        <td class="l code">${esc(i.code)}</td>
+        <td class="l">${esc(i.name)}</td>
+        <td class="l">${esc(i.uom)}</td>
+        <td>${q(i.opening)}</td><td>${q(i.purch)}</td><td>${q(i.move)}</td><td>${q(i.closing)}</td>
+        <td>${q(i.actual)}</td><td>${q(i.theo)}</td>
+        <td class="${sign(i.variance).trim()}">${q(i.variance)}</td>
+        <td class="${sign(i.variance).trim()}">${pct(i.varPct)}</td>
+        <td class="${sign(i.varValue).trim()}">${money(i.varValue)}</td>
+        <td>${money(i.cost)}</td><td>${money(i.closeValue)}</td></tr>`;
+    }
+    h += `<tr class="tot"><td colspan="10"></td><td class="lbl">Totals</td>
+      <td class="${sign(c.varValue).trim()}">${money(c.varValue)}</td><td></td><td>${money(c.closeValue)}</td></tr>`;
+    h += `</tbody></table></div></div>`;
+  }
+  h += `</div>`;
+
+  /* ---- summary with the zero-axis ledger ---- */
+  const scale = Math.max(1, ...cats.map(c => Math.abs(c.varValue)));
+  h += `<div class="panel-body view hidden" id="v-summary">
+    <div class="ledger-head"><div>Category</div><div class="r">Total variance</div>
+      <div class="c">Short ← → Over</div><div class="r">Closing stock</div></div>`;
+  for (const c of [...cats].sort((a, b) => a.varValue - b.varValue)){
+    const w = Math.abs(c.varValue) / scale * 50;
+    h += `<div class="ledger-row">
+      <div class="nm">${esc(c.name)}</div>
+      <div class="vv${sign(c.varValue)}">${money(c.varValue)}</div>
+      <div class="bar"><span class="${c.varValue < 0 ? "n" : "p"}" style="width:${w.toFixed(2)}%"></span></div>
+      <div class="cs">${money(c.closeValue)}</div></div>`;
+  }
+  h += `<div class="ledger-row grand"><div class="nm">Total</div>
+    <div class="vv${sign(rep.totalVar)}">${money(rep.totalVar)}</div><div></div>
+    <div class="cs">${money(rep.totalClose)}</div></div></div>`;
+
+  /* ---- check ---- */
+  h += `<div class="panel-body view hidden" id="v-check">`;
+  if (!rep.flags.length){
+    h += `<div class="empty">Every item reconciles. The period variance matches the sum of the daily variances throughout.</div>`;
+  } else {
+    h += `<div class="flag"><b>${rep.flags.length} item${rep.flags.length===1?"":"s"} to review.</b>
+      The period variance is worked out from the opening and closing counts. The daily figure adds up each day's own variance.
+      They only differ when stock was recounted or adjusted mid-period without a matching movement record, or when an item
+      was missing from some of the daily exports.</div>
+      <div class="scroll"><table><thead><tr>
+      <th class="l">Code</th><th class="l">Name</th><th class="l">Category</th>
+      <th>Days in export</th><th>Period variance</th><th>Sum of daily</th><th>Difference</th></tr></thead><tbody>`;
+    for (const i of rep.flags){
+      const diff = i.variance - i.dailyVar;
+      h += `<tr><td class="l code">${esc(i.code)}</td><td class="l">${esc(i.name)}</td><td class="l">${esc(i.cat)}</td>
+        <td${i.days < rep.days.length ? ' class="neg"' : ""}>${i.days} of ${rep.days.length}</td>
+        <td>${q(i.variance)}</td><td>${q(i.dailyVar)}</td>
+        <td class="${sign(diff).trim()}">${q(diff)}</td></tr>`;
+    }
+    h += `</tbody></table></div>`;
+  }
+  h += `</div></section>`;
+
+  document.getElementById("out").innerHTML = h;
+  document.querySelectorAll(".tab").forEach(t => t.addEventListener("click", () => {
+    document.querySelectorAll(".tab").forEach(x => x.classList.remove("on"));
+    t.classList.add("on");
+    document.querySelectorAll(".view").forEach(v => v.classList.add("hidden"));
+    document.getElementById("v-" + t.dataset.view).classList.remove("hidden");
+  }));
+}
+
+/* ------------------------------------------------------------------
+   Excel export — same layout as the on-screen report
+------------------------------------------------------------------ */
+function download(rep){
+  const hideCats  = document.getElementById("hideCats").checked;
+  const hideItems = document.getElementById("hideItems").checked;
+  const cats = rep.categories.filter(c => !hideCats || c.active);
+  const d0 = rep.days[0], d1 = rep.days[rep.days.length - 1];
+  const A = [];
+  A.push(["Stock Variance Report"]);
+  A.push([rep.store]);
+  A.push([`From ${nice(d0)} to ${nice(d1)}`]);
+  A.push(["All financial totals are excluding VAT"]);
+  A.push([`Consolidated from ${rep.days.length} daily Zania exports — opening from ${d0}, closing from ${d1}`]);
+  A.push([]);
+  for (const c of cats){
+    const list = hideItems ? c.items.filter(i => i.active) : c.items;
+    if (!list.length) continue;
+    A.push([c.name]);
+    A.push(HEAD.slice());
+    for (const i of list){
+      A.push([i.code, i.name, i.uom,
+        +i.opening.toFixed(4), +i.purch.toFixed(4), +i.move.toFixed(4), +i.closing.toFixed(4),
+        +i.actual.toFixed(4), +i.theo.toFixed(4), +i.variance.toFixed(4), +i.varPct.toFixed(2),
+        +i.varValue.toFixed(2), +i.cost.toFixed(4), +i.closeValue.toFixed(2)]);
+    }
+    A.push(["", "", "", "", "", "", "", "", "", "", "Totals",
+      +c.varValue.toFixed(2), "", +c.closeValue.toFixed(2)]);
+    A.push([]); A.push([]);
+  }
+  A.push(["Summary"]);
+  A.push(["Category", "Total Variance", "Total Closing Stock"]);
+  for (const c of cats) A.push([c.name, +c.varValue.toFixed(2), +c.closeValue.toFixed(2)]);
+  A.push(["Total", +rep.totalVar.toFixed(2), +rep.totalClose.toFixed(2)]);
+
+  const ws = XLSX.utils.aoa_to_sheet(A);
+  ws["!cols"] = [{wch:14},{wch:32},{wch:8},{wch:12},{wch:11},{wch:13},{wch:12},
+                 {wch:11},{wch:13},{wch:11},{wch:13},{wch:13},{wch:13},{wch:15}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Stock Variance");
+
+  if (rep.flags.length){
+    const C = [["Items to review"],
+      ["Period variance comes from the opening and closing counts. The daily figure adds up each day's own variance."],
+      [],
+      ["Code","Name","Category","Days in export","Days in period","Period variance","Sum of daily","Difference"]];
+    for (const i of rep.flags){
+      C.push([i.code, i.name, i.cat, i.days, rep.days.length,
+        +i.variance.toFixed(4), +i.dailyVar.toFixed(4), +(i.variance - i.dailyVar).toFixed(4)]);
+    }
+    const wc = XLSX.utils.aoa_to_sheet(C);
+    wc["!cols"] = [{wch:14},{wch:32},{wch:18},{wch:14},{wch:14},{wch:15},{wch:15},{wch:13}];
+    XLSX.utils.book_append_sheet(wb, wc, "Data Check");
+  }
+
+  const safe = rep.store.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  XLSX.writeFile(wb, `Stock_Variance_${safe}_${d0}_to_${d1}.xlsx`);
+}
+
+/* ------------------------------------------------------------------
+   Wiring
+------------------------------------------------------------------ */
+const $ = id => document.getElementById(id);
+let CURRENT = null;
+
+function refresh(){
+  const store = $("store").value;
+  let from = $("from").value, to = $("to").value;
+  if (from > to){ [from, to] = [to, from]; $("from").value = from; $("to").value = to; }
+  CURRENT = consolidate(store, from, to);
+  if (!CURRENT.days.length){
+    $("out").innerHTML = `<section class="panel"><div class="empty">No rows for ${esc(store)} in that date range.</div></section>`;
+    $("dl").disabled = true;
+    return;
+  }
+  $("dl").disabled = false;
+  render(CURRENT);
+}
+
+function loadFile(f){
+  const err = $("loaderr");
+  err.classList.add("hidden");
+  const isCsv = /\.csv$/i.test(f.name);
+  const fr = new FileReader();
+  fr.onload = e => {
+    try{
+      RAW = parseWorkbook(isCsv ? e.target.result : new Uint8Array(e.target.result), isCsv);
+      $("store").innerHTML = RAW.stores.map(s => `<option>${esc(s)}</option>`).join("");
+      const opts = RAW.dates.map(d => `<option value="${d}">${nice(d)}</option>`).join("");
+      $("from").innerHTML = opts; $("to").innerHTML = opts;
+      $("from").value = RAW.dates[0];
+      $("to").value = RAW.dates[RAW.dates.length - 1];
+      $("controls").classList.remove("hidden");
+      $("drop").querySelector(".big").textContent = f.name;
+      $("drop").querySelector(".small").textContent =
+        `${RAW.rows.length.toLocaleString()} rows · ${RAW.dates.length} day${RAW.dates.length===1?"":"s"} · ${RAW.stores.length} store${RAW.stores.length===1?"":"s"} · click to load a different file`;
+      refresh();
+    } catch(ex){
+      err.textContent = ex.message;
+      err.classList.remove("hidden");
+      $("controls").classList.add("hidden");
+      $("out").innerHTML = "";
+    }
+  };
+  fr.onerror = () => { err.textContent = "That file couldn't be read."; err.classList.remove("hidden"); };
+  isCsv ? fr.readAsText(f) : fr.readAsArrayBuffer(f);
+}
+
+$("drop").addEventListener("click", () => $("file").click());
+$("drop").addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " "){ e.preventDefault(); $("file").click(); } });
+$("drop").addEventListener("dragover", e => { e.preventDefault(); $("drop").classList.add("hot"); });
+$("drop").addEventListener("dragleave", () => $("drop").classList.remove("hot"));
+$("drop").addEventListener("drop", e => {
+  e.preventDefault(); $("drop").classList.remove("hot");
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+$("file").addEventListener("change", e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+["store","from","to","hideCats","hideItems"].forEach(id => $(id).addEventListener("change", refresh));
+$("dl").addEventListener("click", () => CURRENT && download(CURRENT));
+$("pr").addEventListener("click", () => window.print());
+</script>
+</body>
+</html>
