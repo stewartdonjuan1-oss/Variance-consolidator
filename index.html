@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Variance Consolidator — Roman's Pizza</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <style>
   :root{
     --ink:#14161a;
@@ -296,7 +298,8 @@
         <label>&nbsp;</label>
         <div style="display:flex;gap:8px">
           <button id="dl">Download Excel</button>
-          <button class="ghost" id="pr">Print / PDF</button>
+          <button id="pdf">Download PDF</button>
+          <button class="ghost" id="pr">Print</button>
         </div>
       </div>
     </div>
@@ -654,6 +657,127 @@ function download(rep){
 }
 
 /* ------------------------------------------------------------------
+   PDF export — landscape A4, laid out like the printed ServeUp report
+------------------------------------------------------------------ */
+function downloadPDF(rep){
+  const lib = window.jspdf && window.jspdf.jsPDF;
+  if (!lib){
+    alert("The PDF library didn't load — check your internet connection, or use the Print button and choose Save as PDF.");
+    return;
+  }
+  const hideCats  = document.getElementById("hideCats").checked;
+  const hideItems = document.getElementById("hideItems").checked;
+  const cats = rep.categories.filter(c => !hideCats || c.active)
+    .map(c => ({...c, items: hideItems ? c.items.filter(i => i.active) : c.items}))
+    .filter(c => c.items.length);
+
+  const doc = new lib({orientation:"landscape", unit:"mm", format:"a4"});
+  const W = doc.internal.pageSize.getWidth();
+  const H = doc.internal.pageSize.getHeight();
+  const M = 8, avail = W - M * 2;
+  const d0 = rep.days[0], d1 = rep.days[rep.days.length - 1];
+
+  const wts = [19,48,11,17,16,19,17,17,19,16,18,21,19,24];
+  const sum = wts.reduce((a, b) => a + b, 0);
+  const colStyles = {};
+  wts.forEach((w, i) => colStyles[i] = {cellWidth: w / sum * avail, halign: i < 3 ? "left" : "right"});
+
+  doc.setFont("helvetica", "bold"); doc.setFontSize(16);
+  doc.text("Stock Variance Report", W/2, 16, {align:"center"});
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+  doc.text(rep.store, W/2, 22, {align:"center"});
+  doc.text(`From ${nice(d0)} to ${nice(d1)}`, W/2, 27, {align:"center"});
+  doc.setFontSize(7.5); doc.setTextColor(120);
+  doc.text("All financial totals are excluding VAT", W/2, 31.5, {align:"center"});
+  doc.text(`Consolidated from ${rep.days.length} daily Zania export${rep.days.length===1?"":"s"}`, W/2, 35, {align:"center"});
+  doc.setTextColor(0);
+
+  const tint = (d, redOnly) => {
+    const s = String(d.cell.raw);
+    const v = parseFloat(s.replace(/[^0-9.\-]/g, ""));
+    if (!isFinite(v) || v === 0) return;
+    if (s.trim().startsWith("-")) d.cell.styles.textColor = [179, 38, 30];
+    else if (!redOnly) d.cell.styles.textColor = [15, 107, 82];
+  };
+
+  let y = 42;
+  for (const c of cats){
+    const body = c.items.map(i => [i.code, i.name, i.uom, q(i.opening), q(i.purch), q(i.move),
+      q(i.closing), q(i.actual), q(i.theo), q(i.variance), pct(i.varPct),
+      money(i.varValue), money(i.cost), money(i.closeValue)]);
+    body.push(["","","","","","","","","","","Totals", money(c.varValue), "", money(c.closeValue)]);
+    const lastRow = body.length - 1;
+
+    if (y > H - 42){ doc.addPage(); y = 16; }
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9.5);
+    doc.text(c.name, M, y);
+    y += 2;
+
+    doc.autoTable({
+      head:[HEAD], body, startY:y,
+      margin:{left:M, right:M, top:16, bottom:14},
+      theme:"plain",
+      styles:{font:"helvetica", fontSize:6.2, cellPadding:{top:1, bottom:1, left:1.2, right:1.2},
+              overflow:"linebreak", textColor:20, lineWidth:0},
+      headStyles:{fontSize:5.6, fontStyle:"bold", textColor:90, halign:"right", valign:"bottom",
+                  lineWidth:{bottom:0.3}, lineColor:[120,120,120]},
+      columnStyles:colStyles,
+      alternateRowStyles:{fillColor:[248,248,249]},
+      didParseCell: d => {
+        if (d.section === "head" && d.column.index < 3) d.cell.styles.halign = "left";
+        if (d.section !== "body") return;
+        if (d.row.index === lastRow){
+          d.cell.styles.fontStyle = "bold";
+          d.cell.styles.lineWidth = {top:0.4};
+          d.cell.styles.lineColor = [40,40,40];
+          d.cell.styles.fillColor = false;
+          if (d.column.index === 10) d.cell.styles.textColor = 110;
+          else if (d.column.index === 11) tint(d, false);
+          return;
+        }
+        if ([9,10,11].includes(d.column.index)) tint(d, false);
+      }
+    });
+    y = doc.lastAutoTable.finalY + 9;
+  }
+
+  doc.addPage();
+  doc.setFont("helvetica", "bold"); doc.setFontSize(13);
+  doc.text("Summary", M, 16);
+  doc.autoTable({
+    head:[["Category", "Total Variance", "Total Closing Stock"]],
+    body:[...cats.map(c => [c.name, money(c.varValue), money(c.closeValue)]),
+          ["Total", money(rep.totalVar), money(rep.totalClose)]],
+    startY:20, margin:{left:M, right:M, bottom:14}, theme:"plain",
+    styles:{font:"helvetica", fontSize:7.5, cellPadding:1.4},
+    headStyles:{fontSize:6.4, fontStyle:"bold", textColor:90,
+                lineWidth:{bottom:0.3}, lineColor:[120,120,120]},
+    columnStyles:{0:{cellWidth:70, halign:"left"}, 1:{cellWidth:40, halign:"right"}, 2:{cellWidth:40, halign:"right"}},
+    didParseCell: d => {
+      if (d.section !== "body") return;
+      if (d.row.index === cats.length){
+        d.cell.styles.fontStyle = "bold";
+        d.cell.styles.lineWidth = {top:0.4};
+        d.cell.styles.lineColor = [40,40,40];
+      }
+      if (d.column.index === 1) tint(d, false);
+    }
+  });
+
+  const pages = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= pages; p++){
+    doc.setPage(p);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(6.5); doc.setTextColor(130);
+    doc.text(`From ${nice(d0)} to ${nice(d1)}`, M, H - 6);
+    doc.text(`${p} of ${pages}`, W/2, H - 6, {align:"center"});
+    doc.text(rep.store, W - M, H - 6, {align:"right"});
+  }
+
+  const safe = rep.store.replace(/[^A-Za-z0-9]+/g, "_").replace(/^_|_$/g, "");
+  doc.save(`Stock_Variance_${safe}_${d0}_to_${d1}.pdf`);
+}
+
+/* ------------------------------------------------------------------
    Wiring
 ------------------------------------------------------------------ */
 const $ = id => document.getElementById(id);
@@ -667,9 +791,11 @@ function refresh(){
   if (!CURRENT.days.length){
     $("out").innerHTML = `<section class="panel"><div class="empty">No rows for ${esc(store)} in that date range.</div></section>`;
     $("dl").disabled = true;
+    $("pdf").disabled = true;
     return;
   }
   $("dl").disabled = false;
+  $("pdf").disabled = false;
   render(CURRENT);
 }
 
@@ -713,6 +839,16 @@ $("drop").addEventListener("drop", e => {
 $("file").addEventListener("change", e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
 ["store","from","to","hideCats","hideItems"].forEach(id => $(id).addEventListener("change", refresh));
 $("dl").addEventListener("click", () => CURRENT && download(CURRENT));
+$("pdf").addEventListener("click", () => {
+  if (!CURRENT) return;
+  const b = $("pdf"), t = b.textContent;
+  b.textContent = "Building…"; b.disabled = true;
+  setTimeout(() => {
+    try { downloadPDF(CURRENT); }
+    catch (e) { alert("Couldn't build the PDF: " + e.message + "\n\nUse the Print button and choose Save as PDF instead."); }
+    finally { b.textContent = t; b.disabled = false; }
+  }, 30);
+});
 $("pr").addEventListener("click", () => window.print());
 </script>
 </body>
